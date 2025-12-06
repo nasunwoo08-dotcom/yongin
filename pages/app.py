@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 import altair as alt 
+import numpy as np # np 추가됨
 
 # --- 1. 웹페이지 설정 및 제목 ---
 st.set_page_config(layout="wide")
@@ -69,16 +70,17 @@ def load_revenue_data(ticker_list):
 
 # 연도 기반 데이터이므로 슬라이더 사용
 current_year = datetime.now().year
-default_end_year = current_year - 2 # 가장 최근 연도는 보통 보고서가 늦게 나옴
-default_start_year = default_end_year - 9 # 10년 기준 (10번째 연도 포함)
+default_end_year = current_year # 현재 연도 (2025년)
+default_start_year = 2021 # 👈 시작 연도를 2021년으로 명시적 설정
+min_year_limit = 2000 # 👈 최소 선택 가능 연도 제한
 
 st.sidebar.markdown("### 📅 데이터 조회 기간")
 # 최대 10년 기준을 만족시키기 위해 끝 연도와 시작 연도를 함께 제한
 start_year = st.sidebar.slider(
-    "시작 연도 선택 (최대 10년)",
-    min_value=current_year - 30, # 30년 이전까지 선택 가능하게 하되,
+    "시작 연도 선택 (2021년 이후 권장)",
+    min_value=min_year_limit, 
     max_value=default_end_year,
-    value=default_start_year,
+    value=default_start_year, # 👈 기본값을 2021년으로 설정
     step=1
 )
 
@@ -93,81 +95,3 @@ chart_type = st.sidebar.radio(
 default_selected_stocks = list(TICKERS.keys())
 selected_stocks = st.sidebar.multiselect(
     "🔍 조회할 종목 선택 (필수)",
-    list(TICKERS.keys()),
-    default=default_selected_stocks
-)
-
-st.sidebar.markdown("---")
-st.sidebar.caption("본 앱은 연간 총매출 데이터를 사용합니다. 데이터 소스(yfinance)의 한계로 인해 10년치 데이터가 부족할 수 있습니다.")
-
-
-# --- 5. 데이터 로드 및 처리 ---
-
-if not selected_stocks:
-    st.warning("☝️ 먼저 왼쪽 사이드바에서 조회할 종목을 하나 이상 선택해 주세요.")
-else:
-    selected_tickers = {name: TICKERS[name] for name in selected_stocks}
-    
-    with st.spinner('연간 총매출 데이터를 불러오는 중입니다...'):
-        df_revenue_full = load_revenue_data(selected_tickers)
-        
-    # 날짜 필터링 (사용자 선택 연도 반영)
-    if not df_revenue_full.empty:
-        df_filtered = df_revenue_full[df_revenue_full.index >= start_year]
-    else:
-        df_filtered = pd.DataFrame()
-    
-    
-    # --- 6. 결과 표시 ---
-    if not df_filtered.empty:
-        
-        st.header(f"💰 {df_filtered.index.min()}년 ~ {df_filtered.index.max()}년 총매출 변화")
-        
-        # 데이터의 규모를 조정 (보기 쉽게 억 원 단위로 변환)
-        # 1000000000 = 10억
-        # 10억으로 나눈 후 반올림하여 '억 원' 단위로 표시
-        df_display = df_filtered / 1_000_000_000 
-        
-        # 총매출 데이터를 기준 연도 대비 '성장률'로 변환
-        first_values = df_display.iloc[0]
-        # 첫 행이 Nan일 수 있으므로, Nan이 아닌 첫 번째 유효한 값으로 기준 설정
-        valid_start_values = df_display.apply(lambda x: x.dropna().iloc[0] if not x.dropna().empty else np.nan)
-        normalized_df = (df_display / valid_start_values.replace(0, 1)) * 100
-        
-        st.subheader("📊 총매출 변화율 (시작 연도 = 100 기준)")
-        st.caption("여러 종목의 성장을 비교하기 위해, 유효한 데이터가 있는 첫 연도의 총매출을 100으로 기준화했습니다.")
-        
-        # 데이터 시각화를 위해 long format으로 변환
-        df_long = normalized_df.reset_index().melt(
-            id_vars='index',
-            var_name='Stock',
-            value_name='Normalized_Revenue'
-        )
-        df_long.rename(columns={'index': 'Year'}, inplace=True)
-        
-        # 사용자가 선택한 그래프 종류에 따라 차트 표시
-        if chart_type == '선 그래프 (Line Chart)':
-            st.subheader("📉 종목별 총매출 성장률 선 그래프")
-            
-            # Altair를 사용한 선 그래프 
-            chart = alt.Chart(df_long).mark_line(point=True).encode( # point=True 추가하여 연도별 데이터 포인트 명시
-                x=alt.X('Year:O', title='연도'), 
-                y=alt.Y('Normalized_Revenue:Q', title='총매출 변화율 (시작 연도=100)'),
-                color='Stock:N',
-                tooltip=['Year:O', 'Stock:N', alt.Tooltip('Normalized_Revenue:Q', format=',.2f')]
-            ).interactive() 
-            
-            st.altair_chart(chart, use_container_width=True)
-            
-        elif chart_type == '막대 그래프 (Bar Chart)':
-            st.subheader("📊 연도별 총매출 막대 그래프")
-            st.bar_chart(normalized_df, use_container_width=True)
-            
-        st.markdown("---")
-
-        # --- 7. 데이터 테이블 표시 ---
-        st.subheader(f"📚 {df_filtered.index.min()}년 이후 총매출 데이터 (단위: 억 원)")
-        st.dataframe(df_display.style.format("{:,.0f} 억 원"), use_container_width=True)
-
-    else:
-        st.error(f"⚠️ 선택하신 연도({start_year}년 이후)에 해당하는 연간 총매출 데이터를 찾지 못했습니다. 시작 연도를 조정하거나 종목 선택을 확인해 주세요.")
