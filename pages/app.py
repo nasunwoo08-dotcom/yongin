@@ -3,7 +3,7 @@ import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
 import altair as alt 
-import numpy as np # np 추가됨
+import numpy as np 
 
 # --- 1. 웹페이지 설정 및 제목 ---
 st.set_page_config(layout="wide")
@@ -16,7 +16,7 @@ TICKERS = {
     "삼성전자 (Samsung Elec)": "005930.KS",
     "SK하이닉스 (SK Hynix)": "000660.KS",
     "DB하이텍 (DB Hitek)": "000990.KS",
-    "리노공업 (Leeno)": "058470.KQ",
+    "리노공업 (Leeno)": "042700.KQ",
     "하나마이크론 (Hana Micron)": "067310.KQ",
 }
 
@@ -70,17 +70,17 @@ def load_revenue_data(ticker_list):
 
 # 연도 기반 데이터이므로 슬라이더 사용
 current_year = datetime.now().year
-default_end_year = current_year # 현재 연도 (2025년)
-default_start_year = 2021 # 👈 시작 연도를 2021년으로 명시적 설정
-min_year_limit = 2000 # 👈 최소 선택 가능 연도 제한
+default_end_year = current_year - 2 # 👈 2025년(미래) 제외. 2023년 데이터가 보통 최신입니다.
+default_start_year = 2021 # 👈 기본 시작 연도를 2021년으로 설정
+min_year_limit = 2000 
 
 st.sidebar.markdown("### 📅 데이터 조회 기간")
 # 최대 10년 기준을 만족시키기 위해 끝 연도와 시작 연도를 함께 제한
 start_year = st.sidebar.slider(
-    "시작 연도 선택 (2021년 이후 권장)",
+    "시작 연도 선택 (기본 2021년)",
     min_value=min_year_limit, 
-    max_value=default_end_year,
-    value=default_start_year, # 👈 기본값을 2021년으로 설정
+    max_value=default_end_year, # 👈 최대 선택 가능 연도는 2023년입니다.
+    value=default_start_year, 
     step=1
 )
 
@@ -158,7 +158,7 @@ else:
                 tooltip=['Year:O', 'Stock:N', alt.Tooltip('Normalized_Revenue:Q', format=',.2f')]
             ).interactive() 
             
-            st.altair_chart(chart, use_container_width=True) 
+            st.altair_chart(chart, use_container_width=True)
             
         elif chart_type == '막대 그래프 (Bar Chart)':
             st.subheader("📊 연도별 총매출 막대 그래프")
