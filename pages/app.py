@@ -95,3 +95,80 @@ chart_type = st.sidebar.radio(
 default_selected_stocks = list(TICKERS.keys())
 selected_stocks = st.sidebar.multiselect(
     "🔍 조회할 종목 선택 (필수)",
+    list(TICKERS.keys()),
+    default=default_selected_stocks
+)
+
+st.sidebar.markdown("---")
+st.sidebar.caption("본 앱은 연간 총매출 데이터를 사용합니다. 데이터 소스(yfinance)의 한계로 인해 모든 연도 데이터가 채워지지 않을 수 있습니다.")
+
+
+# --- 5. 데이터 로드 및 처리 ---
+
+if not selected_stocks:
+    st.warning("☝️ 먼저 왼쪽 사이드바에서 조회할 종목을 하나 이상 선택해 주세요.")
+else:
+    selected_tickers = {name: TICKERS[name] for name in selected_stocks}
+    
+    with st.spinner('연간 총매출 데이터를 불러오는 중입니다...'):
+        df_revenue_full = load_revenue_data(selected_tickers)
+        
+    # 날짜 필터링 (사용자 선택 연도 반영)
+    if not df_revenue_full.empty:
+        df_filtered = df_revenue_full[df_revenue_full.index >= start_year]
+    else:
+        df_filtered = pd.DataFrame()
+    
+    
+    # --- 6. 결과 표시 ---
+    if not df_filtered.empty:
+        
+        st.header(f"💰 {df_filtered.index.min()}년 ~ {df_filtered.index.max()}년 총매출 변화")
+        
+        # 데이터의 규모를 조정 (보기 쉽게 억 원 단위로 변환)
+        # 1,000,000,000으로 나눈 값은 약 10억 원 단위입니다.
+        df_display = df_filtered / 1_000_000_000 
+        
+        # 총매출 데이터를 기준 연도 대비 '성장률'로 변환
+        
+        # Nan이 아닌 첫 번째 유효한 값으로 기준 설정 (결측치 문제 방지)
+        valid_start_values = df_display.apply(lambda x: x.dropna().iloc[0] if not x.dropna().empty else np.nan)
+        normalized_df = (df_display / valid_start_values.replace(0, 1)) * 100
+        
+        st.subheader("📊 총매출 변화율 (시작 연도 = 100 기준)")
+        st.caption("여러 종목의 성장을 비교하기 위해, 유효한 데이터가 있는 첫 연도의 총매출을 100으로 기준화했습니다.")
+        
+        # 데이터 시각화를 위해 long format으로 변환
+        df_long = normalized_df.reset_index().melt(
+            id_vars='index',
+            var_name='Stock',
+            value_name='Normalized_Revenue'
+        )
+        df_long.rename(columns={'index': 'Year'}, inplace=True)
+        
+        # 사용자가 선택한 그래프 종류에 따라 차트 표시
+        if chart_type == '선 그래프 (Line Chart)':
+            st.subheader("📉 종목별 총매출 성장률 선 그래프")
+            
+            # Altair를 사용한 선 그래프 
+            chart = alt.Chart(df_long).mark_line(point=True).encode( 
+                x=alt.X('Year:O', title='연도'), 
+                y=alt.Y('Normalized_Revenue:Q', title='총매출 변화율 (시작 연도=100)'),
+                color='Stock:N',
+                tooltip=['Year:O', 'Stock:N', alt.Tooltip('Normalized_Revenue:Q', format=',.2f')]
+            ).interactive() 
+            
+            st.altair_chart(chart, use_container_width=True) 
+            
+        elif chart_type == '막대 그래프 (Bar Chart)':
+            st.subheader("📊 연도별 총매출 막대 그래프")
+            st.bar_chart(normalized_df, use_container_width=True)
+            
+        st.markdown("---")
+
+        # --- 7. 데이터 테이블 표시 ---
+        st.subheader(f"📚 {df_filtered.index.min()}년 이후 총매출 데이터 (단위: 억 원)")
+        st.dataframe(df_display.style.format("{:,.0f} 억 원"), use_container_width=True)
+
+    else:
+        st.error(f"⚠️ 선택하신 연도({start_year}년 이후)에 해당하는 연간 총매출 데이터를 찾지 못했습니다. 시작 연도를 조정하거나 종목 선택을 확인해 주세요.")
