@@ -20,27 +20,45 @@ TICKERS = {
     "리노공업 (Leeno)": "058470.KQ"
 }
 
-# --- 3. 데이터 로딩 함수 ---
+# --- 3. 데이터 로딩 함수 (수정됨) ---
 @st.cache_data(ttl=60*60*4) # 4시간 캐시 설정 (데이터 빈번 호출 방지)
 def load_data(ticker_list, start_date):
     """지정된 티커 목록의 주식 데이터를 로드합니다."""
     data = {}
+    
+    # 딕셔너리가 비어있을 경우를 대비하여 먼저 빈 DataFrame을 선언
+    final_df = pd.DataFrame() 
+    
     for name, ticker in ticker_list.items():
         try:
             # yfinance를 사용하여 데이터 다운로드
             df = yf.download(ticker, start=start_date, progress=False)
-            if not df.empty:
+            
+            # 데이터가 비어있지 않고 'Close' 컬럼이 있는지 확인
+            if not df.empty and 'Close' in df.columns:
                 # 종가만 저장하고, 컬럼 이름을 종목 이름으로 변경
                 data[name] = df['Close']
             else:
-                st.warning(f"🚨 {name} ({ticker}): 데이터를 불러오지 못했습니다. 티커를 확인하세요.")
+                st.warning(f"🚨 {name} ({ticker}): 데이터를 불러오지 못했거나 'Close' 컬럼이 없습니다.")
+                
         except Exception as e:
             st.error(f"❌ 데이터 로드 중 오류 발생: {name} - {e}")
 
     # 모든 종가 데이터를 하나의 DataFrame으로 합치기
     if data:
-        return pd.DataFrame(data)
-    return pd.DataFrame()
+        try:
+            # Pandas Series의 딕셔너리를 DataFrame으로 변환 시도
+            final_df = pd.DataFrame(data)
+        except ValueError as e:
+            # ValueError: If using all scalar values, you must pass an index
+            # 이 에러가 발생하면 디버깅 정보를 출력하고 빈 DataFrame 반환
+            st.error(f"❌ 데이터프레임 생성 중 구조 오류 발생: {e}")
+            st.warning(f"데이터 딕셔너리 첫 번째 항목: {list(data.items())[0] if data else 'N/A'}")
+            st.warning("데이터 구조를 확인해 주세요. yfinance가 비정상적인 데이터를 반환했을 수 있습니다.")
+            final_df = pd.DataFrame()
+            
+    # 최종 DataFrame을 반환합니다. 데이터가 없으면 빈 DataFrame이 반환됨.
+    return final_df
 
 # --- 4. 사이드바 입력 위젯 ---
 
@@ -83,6 +101,7 @@ else:
     selected_tickers = {name: TICKERS[name] for name in selected_stocks}
     
     # 데이터 로드 실행
+    # start_date를 문자열로 변환하여 load_data에 전달 (yfinance 형식)
     with st.spinner('데이터를 불러오는 중입니다... 잠시만 기다려 주세요.'):
         df_stocks = load_data(selected_tickers, start_date.strftime('%Y-%m-%d'))
     
@@ -94,6 +113,8 @@ else:
         
         # DataFrame 헤드 표시 (최신 데이터 확인용)
         st.subheader("📌 최신 종가 데이터")
+        # 데이터가 없을 경우 에러 방지를 위해 .tail(0) 대신 .head(5)를 사용하고, 
+        # T.style.format을 사용하여 포맷팅합니다.
         st.dataframe(df_stocks.tail(5).T.style.format("{:,.0f} 원"), use_container_width=True)
 
 
@@ -104,7 +125,6 @@ else:
             
         elif chart_type == '막대 그래프 (Bar Chart)':
             st.subheader("📊 일자별 종가 막대 그래프")
-            # 막대 그래프는 각 종목의 일별 종가를 막대로 표시합니다.
             st.bar_chart(df_stocks, use_container_width=True)
             
         st.markdown("---")
@@ -114,4 +134,5 @@ else:
         st.dataframe(df_stocks.style.format("{:,.0f} 원"), use_container_width=True)
 
     else:
+        # 데이터 로드 실패 메시지 (load_data 내부에서 이미 출력되었을 수 있음)
         st.error("⚠️ 데이터를 불러오지 못했습니다. 종목 코드나 날짜 설정을 확인해 주세요.")
