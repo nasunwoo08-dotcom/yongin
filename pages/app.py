@@ -20,7 +20,7 @@ TICKERS = {
     "하나마이크론 (Hana Micron)": "067310.KQ",
 }
 
-# --- 3. 데이터 로딩 함수 ---
+# --- 3. 데이터 로딩 함수 (최종 수정 버전) ---
 @st.cache_data(ttl=60*60*4) # 4시간 캐시 설정
 def load_data(ticker_list, start_date, end_date):
     """지정된 티커 목록의 주식 종가 데이터를 로드합니다."""
@@ -28,15 +28,21 @@ def load_data(ticker_list, start_date, end_date):
     
     for name, ticker in ticker_list.items():
         try:
-            # yfinance를 사용하여 데이터 다운로드
             df = yf.download(ticker, start=start_date, end=end_date, progress=False)
             
             # 데이터 검증: 비어있지 않고 'Close' 컬럼이 있는지 확인
             if not df.empty and 'Close' in df.columns:
-                # 종가(Close) Series만 저장
-                data[name] = df['Close']
+                
+                close_series = df['Close']
+                
+                # 🚨 핵심 수정: 데이터가 DataFrame이 아닌 Series인지 명시적으로 확인
+                if isinstance(close_series, pd.Series):
+                    data[name] = close_series
+                else:
+                    # 'Close'를 추출했는데도 Series가 아닌 경우 경고 (데이터 구조 오류)
+                    st.warning(f"🚨 {name} ({ticker}): 'Close' 데이터가 시계열(Series) 형태가 아닙니다. 로드 실패.")
+                
             else:
-                # 데이터 로드 실패 시 디버깅 정보를 터미널(콘솔)에 출력
                 st.warning(f"🚨 {name} ({ticker}): 해당 기간의 데이터를 불러오지 못했습니다. df.empty={df.empty}")
                 
         except Exception as e:
@@ -45,13 +51,12 @@ def load_data(ticker_list, start_date, end_date):
     # 모든 종가 데이터를 하나의 DataFrame으로 합치기
     if data:
         try:
-            # Series 딕셔너리를 DataFrame으로 변환 시도
             df_stocks = pd.DataFrame(data)
             return df_stocks.sort_index()
         except ValueError as e:
             # 구조 오류 발생 시 디버깅 정보 출력
-            st.error(f"❌ 데이터프레임 생성 중 구조 오류 발생: {e}")
-            st.warning("데이터 구조 문제: yfinance가 비정상적인 스칼라 값을 반환했을 수 있습니다.")
+            st.error(f"❌ 최종 데이터프레임 구조 오류: {e}")
+            st.warning("데이터 구조 문제: 딕셔너리에 Series가 아닌 다른 값이 포함되었습니다.")
             
             # 문제의 원인 파악을 위한 디버깅 정보 출력
             for name, value in data.items():
@@ -64,100 +69,5 @@ def load_data(ticker_list, start_date, end_date):
 
 # --- 4. 사이드바 입력 위젯 ---
 
-# 수정된 설정: 조회 마감 날짜를 1년 전으로 고정하여 안정성 확보
-end_date_limit = datetime.now() - timedelta(days=365) # 1년 전 날짜
-
-# 수정된 설정: 기본 시작 날짜를 10년 전으로 설정
-default_start_date = end_date_limit - timedelta(days=10 * 365) 
-
-start_date = st.sidebar.date_input(
-    "📅 데이터 조회 시작 날짜",
-    value=default_start_date,
-    min_value=datetime(1990, 1, 1), 
-    max_value=end_date_limit # 최대 날짜를 1년 전으로 제한
-)
-
-# 4-2. 그래프 종류 선택
-chart_type = st.sidebar.radio(
-    "📈 그래프 종류 선택",
-    ('선 그래프 (Line Chart)', '막대 그래프 (Bar Chart)'),
-    index=0
-)
-
-# 4-3. 종목 필터링 (다중 선택)
-# 🚨 수정: 기본값을 전체 종목으로 설정하여 화면이 비어있는 문제 방지
-default_selected_stocks = list(TICKERS.keys())
-selected_stocks = st.sidebar.multiselect(
-    "🔍 조회할 종목 선택 (필수)",
-    list(TICKERS.keys()),
-    default=default_selected_stocks
-)
-
-st.sidebar.markdown("---")
-st.sidebar.caption("본 웹페이지의 데이터는 주가(종가) 추이를 기반으로 하며, 투자의 책임은 사용자에게 있습니다.")
-
-
-# --- 5. 데이터 로드 및 처리 ---
-
-if not selected_stocks:
-    # 종목 선택이 없으면, 사용자에게 안내 메시지를 명확하게 표시
-    st.warning("☝️ 먼저 왼쪽 사이드바에서 조회할 종목을 하나 이상 선택해 주세요.")
-else:
-    # 선택된 종목만 필터링하여 데이터 로드
-    selected_tickers = {name: TICKERS[name] for name in selected_stocks}
-    
-    # 데이터 로드 실행
-    with st.spinner('데이터를 불러오는 중입니다... 잠시만 기다려 주세요.'):
-        df_stocks = load_data(
-            selected_tickers, 
-            start_date.strftime('%Y-%m-%d'),
-            end_date_limit.strftime('%Y-%m-%d') # 마감 날짜를 1년 전으로 고정
-        )
-    
-    # --- 6. 결과 표시 ---
-    if not df_stocks.empty:
-        
-        # 그래프 제목
-        st.header(f"💰 {start_date.strftime('%Y-%m-%d')} ~ {end_date_limit.strftime('%Y-%m-%d')} 주가(종가) 추이")
-        
-        # 주가 데이터를 기준일 대비 '성장률'로 변환
-        first_values = df_stocks.iloc[0]
-        normalized_df = (df_stocks / first_values.replace(0, 1)) * 100
-        
-        st.subheader("📊 주가 변화율 (시작일 = 100 기준)")
-        st.caption("여러 종목의 장기간 성장을 비교하기 위해, 조회 시작 날짜의 주가를 100으로 기준화했습니다.")
-        
-        # 데이터 시각화를 위해 long format으로 변환
-        df_long = normalized_df.reset_index().melt(
-            id_vars='Date',
-            var_name='Stock',
-            value_name='Normalized_Price'
-        )
-        
-        # 사용자가 선택한 그래프 종류에 따라 차트 표시
-        if chart_type == '선 그래프 (Line Chart)':
-            st.subheader("📉 종목별 성장률 선 그래프")
-            
-            # Altair를 사용한 선 그래프 (Tooltip, Interactive 기능 포함)
-            chart = alt.Chart(df_long).mark_line().encode(
-                x=alt.X('Date:T', title='날짜'),
-                y=alt.Y('Normalized_Price:Q', title='주가 변화율 (시작일=100)'),
-                color='Stock:N',
-                tooltip=['Date:T', 'Stock:N', alt.Tooltip('Normalized_Price:Q', format=',.2f')]
-            ).interactive() 
-            
-            st.altair_chart(chart, use_container_width=True)
-            
-        elif chart_type == '막대 그래프 (Bar Chart)':
-            st.subheader("📊 일자별 종가 막대 그래프")
-            st.bar_chart(normalized_df, use_container_width=True)
-            
-        st.markdown("---")
-
-        # --- 7. 데이터 테이블 표시 ---
-        st.subheader("📚 전체 기간 주가 데이터 (변화율 기준)")
-        st.dataframe(normalized_df.style.format("{:,.2f}"), use_container_width=True)
-
-    else:
-        # 데이터 로드에 실패했을 때 출력되는 최종 에러 메시지
-        st.error("⚠️ 데이터를 불러오지 못했습니다. 종목 코드나 날짜 설정을 확인해 주세요.")
+# 🚨 수정된 설정: 조회 마감 날짜를 1년 전으로 고정하여 안정성 확보
+end_date_
