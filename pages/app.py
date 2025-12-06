@@ -35,11 +35,10 @@ def load_data(ticker_list, start_date, end_date):
                 
                 close_series = df['Close']
                 
-                # 🚨 핵심 수정: 데이터가 DataFrame이 아닌 Series인지 명시적으로 확인
+                # 데이터가 Series 형태인지 명시적으로 확인하여 구조 오류 방지
                 if isinstance(close_series, pd.Series):
                     data[name] = close_series
                 else:
-                    # 'Close'를 추출했는데도 Series가 아닌 경우 경고 (데이터 구조 오류)
                     st.warning(f"🚨 {name} ({ticker}): 'Close' 데이터가 시계열(Series) 형태가 아닙니다. 로드 실패.")
                 
             else:
@@ -54,7 +53,6 @@ def load_data(ticker_list, start_date, end_date):
             df_stocks = pd.DataFrame(data)
             return df_stocks.sort_index()
         except ValueError as e:
-            # 구조 오류 발생 시 디버깅 정보 출력
             st.error(f"❌ 최종 데이터프레임 구조 오류: {e}")
             st.warning("데이터 구조 문제: 딕셔너리에 Series가 아닌 다른 값이 포함되었습니다.")
             
@@ -69,5 +67,16 @@ def load_data(ticker_list, start_date, end_date):
 
 # --- 4. 사이드바 입력 위젯 ---
 
-# 🚨 수정된 설정: 조회 마감 날짜를 1년 전으로 고정하여 안정성 확보
-end_date_
+# 마감 날짜를 1년 전으로 고정하여 안정성 확보
+end_date_limit = datetime.now() - timedelta(days=365) 
+
+# 기본 시작 날짜를 10년 전으로 설정
+default_start_date = end_date_limit - timedelta(days=10 * 365) 
+
+# 🚨 핵심 수정: 최소 조회 기간을 10년 전으로 고정 (최대 10년치만 조회 가능)
+min_date_limit = end_date_limit - timedelta(days=10 * 365) 
+
+start_date = st.sidebar.date_input(
+    "📅 데이터 조회 시작 날짜",
+    value=default_start_date,
+    min_value=min
