@@ -7,3 +7,5 @@ plotly
 datetime
 timedelta
 re
+pandas
+yfinance
